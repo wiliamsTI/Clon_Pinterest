@@ -1,11 +1,20 @@
 const express = require("express");
 const passport = require("passport");
+const cloudinary = require("cloudinary");
+const fs = require("fs-extra");
+require("dotenv").config();
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_NAME,
+  api_key: process.env.API_KEY_CLOUDINARY,
+  api_secret: process.env.SECRET_CLOUDINARY
+});
+
 const ImageService = require("../services/image.service");
 const validatorHandler = require("../middlewares/validator.handler");
 const {
   uploadImageHandler,
   helperImage,
-} = require("../middlewares/multer.handler");
+} = require("../middlewares/images.handler");
 const {
   createImageSchema,
   getImageSchema,
@@ -25,7 +34,7 @@ const service = new ImageService();
  *      properties:
  *        userId:
  *          type: number
- *        name:
+ *        title:
  *          type: string
  *        description:
  *          type: string
@@ -33,12 +42,12 @@ const service = new ImageService();
  *          type: file
  *      required:
  *        - userId
- *        - name
+ *        - title
  *        - description
  *        - file
  *      example:
  *        userId: 1
- *        name: "Imagen de un monitor"
+ *        title: "Imagen de un monitor"
  *        description: "Imagen de un monitor"
  *        file: "image.jpg"
  *
@@ -47,28 +56,25 @@ const service = new ImageService();
  *      properties:
  *        userId:
  *          type: number
- *        name:
+ *        title:
  *          type: string
  *        description:
  *          type: string
  *      example:
- *        name: "Imagen de un monitor"
+ *        title: "Imagen de un monitor"
  *        description: "Imagen de un monitor"
  *
  *
  *    ResponseImages:
  *      example:
  *        id: 1
- *        name: "Imagen de un monitor"
+ *        title: "Imagen de un monitor"
  *        description: "Imagen de un monitor"
- *        filename: "1655247459806.jpg"
- *        path: "/home/wiliams-ixcoy/Desktop/node.js/autenticacion/public/images/1655247459806.jpg"
- *        originalname: "fotis-fotopoulos-6sAl6aQ4OWI-unsplash.jpg"
- *        mimetype: "image/jpeg"
+ *        url_image: "http://res.cloudinary.com/dk1mbdqmn/image/upload/v1655691194/qypboxdljgs82w2dx7c7.jpg"
  *        userId: 1
  *        user: {
  *         id: 1,
- *         name: "Wiliams Alexander",
+ *         title: "Wiliams Alexander",
  *         description: "Tzoc Ixcoy",
  *         email: "wiliamscode34@gmail.com",
  *         createdAt: "2020-05-05T17:00:00.000Z",
@@ -78,7 +84,7 @@ const service = new ImageService();
 
 /**
  * @swagger
- * /api/images:
+ * /api/images/upload:
  *  post:
  *    description: Sube una imagen
  *    tags: [Images]
@@ -104,26 +110,26 @@ const service = new ImageService();
  *
  */
 router.post(
-  "/",
+  "/upload",
   validatorHandler(createImageSchema, "body"),
   passport.authenticate("jwt", { session: false }),
   uploadImageHandler.single("file"),
   async (req, res, next) => {
     try {
-      await helperImage(req.file.path, `resized-${req.file.filename}`);
-
+      const imageResize = await helperImage(req.file.path, `resized-${req.file.url_image}`);
+      const imageCloudinary = await cloudinary.v2.uploader.upload(imageResize.path);
+      console.log(imageResize);
+      console.log(imageCloudinary);
       const data = {
-        name: req.body.name,
+        title: req.body.title,
         description: req.body.description,
-        filename: req.file.filename,
-        path: req.file.path,
-        originalname: req.file.originalname,
-        mimetype: req.file.mimetype,
-        size: req.file.size,
+        url_image: imageCloudinary.secure_url,
         userId: req.body.userId,
       };
-      const result = await service.create(data);
-      res.json(result);
+      const newImage = await service.create(data);
+      await fs.unlink(req.file.path)
+      await fs.unlink(imageResize.path)
+      res.json(newImage);
     } catch (e) {
       next(e);
     }
@@ -165,11 +171,11 @@ router.get("/", async (req, res, next) => {
 /* obtener un solo imagen */
 /**
  * @swagger
- * /api/images/{id}:
+ * /api/images/{id}/image:
  *  get:
  *    description: Obtiene todas las imagenes
  *    tags: [Images]
-  *    parameters:
+ *    parameters:
  *     - in: path
  *       name: id
  *       schema:
@@ -195,7 +201,7 @@ router.get("/", async (req, res, next) => {
  *       description: Internal server error
  */
 router.get(
-  "/:id",
+  "/:id/image",
   validatorHandler(getImageSchema, "params"),
   passport.authenticate("jwt", { session: false }),
   async (req, res, next) => {
@@ -210,9 +216,9 @@ router.get(
 );
 /**
  * @swagger
- * api/images/{id}:
+ * /api/images/{id}/update:
  *  patch:
- *    description: Actualiza un usuario, ni un dato es requerido, se puede cambiar un solo campo o varios, necesita token de autorizacion
+ *    description: Actualiza un imagen, ni un dato es requerido, se puede cambiar un solo campo o varios, necesita token de autorizacion
  *    tags: [Images]
  *    parameters:
  *     - in: path
@@ -226,7 +232,7 @@ router.get(
  *             $ref: '#/components/schemas/ImageUpdate'
  *    responses:
  *      200:
- *       description: Datos actualizados.retorna toda la información del usuario
+ *       description: Datos actualizados.retorna toda la información del imagen
  *       content:
  *        application/json:
  *          schema:
@@ -245,7 +251,7 @@ router.get(
  *       description: Internal server error
  */
 router.patch(
-  "/:id",
+  "/:id/update",
   validatorHandler(getImageSchema, "params"),
   validatorHandler(updateImageSchema, "body"),
   passport.authenticate("jwt", { session: false }),
@@ -263,9 +269,9 @@ router.patch(
 
 /**
  * @swagger
- * /api/images/{id}:
+ * /api/images/{id}/delete:
  *  delete:
- *    description: elimina un usuario, necesita token de autorizacion
+ *    description: elimina una imagen, necesita token de autorizacion
  *    tags: [Images]
  *    parameters:
  *     - in: path
@@ -274,7 +280,7 @@ router.patch(
  *        type: number
  *    responses:
  *      200:
- *       description: Usuario eliminado
+ *       description: imagen eliminada
  *       content:
  *        application/json:
  *         schema:
@@ -282,7 +288,7 @@ router.patch(
  *          properties:
  *           message:
  *            type: string
- *          example: "User deleted"
+ *          example: "imagen eliminada"
  *      400:
  *       description: Bad request
  *      401:
@@ -295,7 +301,7 @@ router.patch(
  *       description: Internal server error
  */
 router.delete(
-  "/:id",
+  "/:id/delete",
   passport.authenticate("jwt", { session: false }),
   validatorHandler(getImageSchema, "params"),
 
